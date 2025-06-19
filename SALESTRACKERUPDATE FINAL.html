@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sales Tracker with Filters & Categories</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+ <style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #e0f7fa; /* Soft cyan background */
+    color: #333;
+  }
+
+  h1 {
+    text-align: center;
+    color: #006064;
+    margin-bottom: 30px;
+  }
+
+  form, table, .controls, .chart-container, .filters {
+    max-width: 900px;
+    margin: 20px auto;
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  input, select, textarea, button {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+  }
+
+  button {
+    background-color: #00838f;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+
+  button:hover {
+    background-color: #006064;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th {
+    background-color: #00838f;
+    color: white;
+  }
+
+  th, td {
+    padding: 12px;
+    border-bottom: 1px solid #ddd;
+    text-align: center;
+  }
+
+  .summary {
+    text-align: center;
+    margin-top: 20px;
+    font-weight: bold;
+    font-size: 18px;
+  }
+
+  .export-btn {
+    background-color: #43a047;
+  }
+
+  .edit-btn, .delete-btn {
+    padding: 5px 10px;
+    margin: 2px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .edit-btn {
+    background-color: #ffb300;
+    color: white;
+  }
+
+  .delete-btn {
+    background-color: #e53935;
+    color: white;
+  }
+</style>
+
+</head>
+<body>
+  <h1>Mommy J's Printing and Pc Repair Set and Parts Sales Tracker</h1>
+
+  <form id="entryForm">
+    <input type="hidden" id="editIndex" />
+    <label>Date: <input type="date" id="date" required></label>
+    <label>Sales Amount: <input type="number" id="sales" required></label>
+    <label>Expenses Amount: <input type="number" id="expenses" required></label>
+    <label>Category:
+      <select id="category" required>
+        <option value="">Select Category</option>
+        <option>Sales</option>
+        <option>Supplies</option>
+        <option>Repairs</option>
+        <option>Bills</option>
+        <option>Others</option>
+      </select>
+    </label>
+    <label>Notes: <textarea id="notes"></textarea></label>
+    <button type="submit">Save Entry</button>
+  </form>
+
+  <div class="filters">
+    <label>Filter by Start Date: <input type="date" id="startDate"></label>
+    <label>Filter by End Date: <input type="date" id="endDate"></label>
+    <label>Filter by Category:
+      <select id="filterCategory">
+        <option value="">All Categories</option>
+        <option>Sales</option>
+        <option>Supplies</option>
+        <option>Repairs</option>
+        <option>Bills</option>
+        <option>Others</option>
+      </select>
+    </label>
+    <button onclick="applyFilters()">Apply Filters</button>
+  </div>
+
+  <div class="controls">
+    <button class="export-btn" onclick="exportToExcel()">Download Excel (.xlsx)</button>
+  </div>
+
+  <table id="recordsTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Sales</th>
+        <th>Expenses</th>
+        <th>Profit</th>
+        <th>Category</th>
+        <th>Notes</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="chart-container">
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    let records = JSON.parse(localStorage.getItem('records')) || [];
+    let filteredRecords = [...records];
+
+    const form = document.getElementById('entryForm');
+    const summary = document.getElementById('summary');
+    const tableBody = document.querySelector('#recordsTable tbody');
+    const chartCanvas = document.getElementById('chart');
+    let chartInstance;
+
+    function updateTable(data = filteredRecords) {
+      tableBody.innerHTML = '';
+      let totalSales = 0, totalExpenses = 0;
+
+      data.forEach((record, i) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${record.date}</td>
+          <td>${record.sales.toFixed(2)}</td>
+          <td>${record.expenses.toFixed(2)}</td>
+          <td>${(record.sales - record.expenses).toFixed(2)}</td>
+          <td>${record.category}</td>
+          <td>${record.notes || ''}</td>
+          <td>
+            <button class="edit-btn" onclick="editEntry(${i})">Edit</button>
+            <button class="delete-btn" onclick="deleteEntry(${i})">Delete</button>
+          </td>
+        `;
+        tableBody.appendChild(row);
+        totalSales += record.sales;
+        totalExpenses += record.expenses;
+      });
+
+      const profit = totalSales - totalExpenses;
+      summary.innerHTML = `Total Sales: ₱${totalSales.toFixed(2)} | Total Expenses: ₱${totalExpenses.toFixed(2)} | Total Profit: ₱${profit.toFixed(2)}`;
+      updateChart(data);
+    }
+
+    function applyFilters() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      const category = document.getElementById('filterCategory').value;
+
+      filteredRecords = records.filter(r => {
+        const matchDate = (!start || r.date >= start) && (!end || r.date <= end);
+        const matchCategory = !category || r.category === category;
+        return matchDate && matchCategory;
+      });
+
+      updateTable(filteredRecords);
+    }
+
+    function exportToExcel() {
+      const ws_data = [
+        ['Date', 'Sales', 'Expenses', 'Profit', 'Category', 'Notes'],
+        ...filteredRecords.map(r => [
+          r.date,
+          r.sales.toFixed(2),
+          r.expenses.toFixed(2),
+          (r.sales - r.expenses).toFixed(2),
+          r.category,
+          r.notes || ''
+        ])
+      ];
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      XLSX.utils.book_append_sheet(wb, ws, 'Records');
+      XLSX.writeFile(wb, 'sales-expenses.xlsx');
+    }
+
+    function editEntry(index) {
+      const r = filteredRecords[index];
+      const realIndex = records.findIndex(x =>
+        x.date === r.date && x.sales === r.sales && x.expenses === r.expenses && x.notes === r.notes
+      );
+      document.getElementById('date').value = r.date;
+      document.getElementById('sales').value = r.sales;
+      document.getElementById('expenses').value = r.expenses;
+      document.getElementById('category').value = r.category;
+      document.getElementById('notes').value = r.notes;
+      document.getElementById('editIndex').value = realIndex;
+    }
+
+    function deleteEntry(index) {
+      const r = filteredRecords[index];
+      const realIndex = records.findIndex(x =>
+        x.date === r.date && x.sales === r.sales && x.expenses === r.expenses && x.notes === r.notes
+      );
+      if (confirm('Are you sure you want to delete this entry?')) {
+        records.splice(realIndex, 1);
+        localStorage.setItem('records', JSON.stringify(records));
+        applyFilters();
+      }
+    }
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const newRecord = {
+        date: document.getElementById('date').value,
+        sales: parseFloat(document.getElementById('sales').value),
+        expenses: parseFloat(document.getElementById('expenses').value),
+        category: document.getElementById('category').value,
+        notes: document.getElementById('notes').value
+      };
+      const editIndex = document.getElementById('editIndex').value;
+      if (editIndex === '') {
+        records.push(newRecord);
+      } else {
+        records[parseInt(editIndex)] = newRecord;
+        document.getElementById('editIndex').value = '';
+      }
+      localStorage.setItem('records', JSON.stringify(records));
+      form.reset();
+      applyFilters();
+    });
+
+    function updateChart(data = filteredRecords) {
+      const labels = data.map(r => r.date);
+      const salesData = data.map(r => r.sales);
+      const expensesData = data.map(r => r.expenses);
+      const profitData = data.map(r => r.sales - r.expenses);
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: 'Sales', data: salesData, backgroundColor: 'rgba(54, 162, 235, 0.6)' },
+            { label: 'Expenses', data: expensesData, backgroundColor: 'rgba(255, 99, 132, 0.6)' },
+            { label: 'Profit', data: profitData, backgroundColor: 'rgba(75, 192, 192, 0.6)' }
+          ]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    applyFilters();
+  </script>
+</body>
+</html>
